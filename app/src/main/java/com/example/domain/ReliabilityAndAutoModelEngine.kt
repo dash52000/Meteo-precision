@@ -22,6 +22,9 @@ object ReliabilityAndAutoModelEngine {
 
     private const val RAIN_DETECTION_THRESHOLD_MM = 0.2
 
+    /** Version de la méthode de calcul : un rapport en cache d'une autre version est recalculé. */
+    private const val METHOD_VERSION = 2
+
     /**
      * Calcule la fiabilité des prévisions sur une fenêtre glissante de 30 jours en comparant
      * Previous Runs API aux observations réelles (GroundTruthWeatherSource).
@@ -41,12 +44,13 @@ object ReliabilityAndAutoModelEngine {
         val queryEnd = today.minusDays(2)
         val queryStart = queryEnd.minusDays(35)
 
-        val actualAll = groundTruthSource.fetchDailyObservations(
+        val groundTruth = groundTruthSource.fetchDailyObservationsWithSource(
             latitude = latitude,
             longitude = longitude,
             startDate = queryStart,
             endDate = queryEnd
         )
+        val actualAll = groundTruth.observations
 
         val sortedValidDates = actualAll.keys.sorted().takeLast(30)
         if (sortedValidDates.isEmpty()) {
@@ -54,7 +58,7 @@ object ReliabilityAndAutoModelEngine {
                 locationKey = locationKey,
                 locationName = locationName,
                 today = today,
-                sourceName = groundTruthSource.sourceDisplayName
+                sourceName = groundTruth.sourceDisplayName
             )
         }
 
@@ -103,7 +107,7 @@ object ReliabilityAndAutoModelEngine {
             calculatedEpochDay = today.toEpochDay(),
             windowStartIso = windowStart.toString(),
             windowEndIso = windowEnd.toString(),
-            groundTruthSourceName = groundTruthSource.sourceDisplayName,
+            groundTruthSourceName = groundTruth.sourceDisplayName,
             metrics = allMetrics,
             verdictSentence = verdict,
             autoRecommendation = autoRec
@@ -304,6 +308,7 @@ object ReliabilityAndAutoModelEngine {
 
     fun serializeReportToJson(report: LocationReliabilityReport): String {
         val root = JSONObject()
+        root.put("methodVersion", METHOD_VERSION)
         root.put("locationKey", report.locationKey)
         root.put("locationName", report.locationName)
         root.put("calculatedEpochDay", report.calculatedEpochDay)
@@ -356,6 +361,8 @@ object ReliabilityAndAutoModelEngine {
     fun deserializeReportFromJson(jsonString: String): LocationReliabilityReport? {
         return runCatching {
             val root = JSONObject(jsonString)
+            // Rapport calculé avec une ancienne méthode (ex. réanalyse seule) : on le recalcule
+            if (root.optInt("methodVersion", 1) != METHOD_VERSION) return null
             val autoObj = root.getJSONObject("autoRecommendation")
             val autoRec = AutoModelRecommendation(
                 tempModel0to48h = WeatherModel.fromApiId(autoObj.optString("temp0_48")) ?: WeatherModel.ICON_D2,

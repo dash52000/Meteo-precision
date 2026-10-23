@@ -11,7 +11,9 @@ import com.example.data.local.RunningScoreSettingsEntity
 import com.example.data.local.SavedLocationEntity
 import com.example.data.remote.GeocodingResultItem
 import com.example.data.remote.OpenMeteoClient
+import com.example.data.remote.IrmStationObservationSource
 import com.example.data.remote.OpenMeteoHistoricalReanalysisSource
+import com.example.data.remote.StationThenReanalysisSource
 import com.example.model.ActiveLocation
 import com.example.model.CompleteWeatherDashboard
 import com.example.model.LocationReliabilityReport
@@ -364,7 +366,11 @@ class WeatherViewModel(
                 override fun <T : ViewModel> create(modelClass: Class<T>): T {
                     val db = AppDatabase.getInstance(context)
                     val client = OpenMeteoClient()
-                    val groundTruth = OpenMeteoHistoricalReanalysisSource(client.httpClient)
+                    // Le « réel » = la station IRM la plus proche (≤ 25 km, sans clé), sinon la réanalyse
+                    val groundTruth = StationThenReanalysisSource(
+                        station = IrmStationObservationSource(client.httpClient),
+                        reanalysis = OpenMeteoHistoricalReanalysisSource(client.httpClient)
+                    )
                     val repo = WeatherRepository(
                         weatherDao = db.weatherDao(),
                         openMeteoClient = client,

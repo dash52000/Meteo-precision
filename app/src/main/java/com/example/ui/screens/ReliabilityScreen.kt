@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import com.example.data.remote.IRM_SOURCE_PREFIX
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -99,8 +100,13 @@ fun ReliabilityScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(modifier = Modifier.weight(1f)) {
+                    val measuredByStation = report?.groundTruthSourceName?.startsWith(IRM_SOURCE_PREFIX) == true
                     Text(
-                        text = "Fiabilité des Prévisions · ${activeLocation.name}",
+                        text = if (report == null || measuredByStation) {
+                            "Fiabilité des Prévisions · ${activeLocation.name}"
+                        } else {
+                            "Écart à la réanalyse · ${activeLocation.name}"
+                        },
                         style = MaterialTheme.typography.headlineMedium,
                         color = TextPrimary
                     )
@@ -480,13 +486,21 @@ fun ReliabilityScreen(
                     )
                     Spacer(modifier = Modifier.width(10.dp))
                     Column {
+                        val isStation = report.groundTruthSourceName.startsWith(IRM_SOURCE_PREFIX)
                         Text(
-                            text = "Module Source du « Réel » : ${report.groundTruthSourceName}",
+                            text = "Référence du « réel » : ${report.groundTruthSourceName}",
                             style = MaterialTheme.typography.labelMedium,
                             color = TextPrimary
                         )
                         Text(
-                            text = "Interface modulaire GroundTruthWeatherSource prête pour le branchement ultérieur de stations météo locales.",
+                            text = if (isStation) {
+                                "Mesures réelles de la station IRM la plus proche (données ouvertes, sans clé). " +
+                                    "Une station reste un point : la distance et le dénivelé peuvent créer un petit écart propre au lieu."
+                            } else {
+                                "Aucune station IRM à moins de 25 km (ou service indisponible) : comparaison avec la réanalyse, " +
+                                    "qui est elle-même un modèle à maille large. Elle avantage ECMWF et pénalise AROME / ICON-D2 : " +
+                                    "lis ces scores comme un écart à la réanalyse, pas comme une fiabilité mesurée."
+                            },
                             style = MaterialTheme.typography.bodySmall,
                             color = TextSecondary
                         )

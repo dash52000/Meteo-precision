@@ -26,12 +26,41 @@ jobs:
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee build.log
 
+      - name: Tests unitaires (station IRM, fiabilité, score course)
+        run: |
+          ./gradlew testDebugUnitTest --no-daemon --tests 'com.example.IrmStationSourceTest' --tests 'com.example.ExampleRobolectricTest' 2>&1 | tee -a build.log
+
+      # Vérifie le format réel du service IRM (Buzenol, 3 derniers jours) ; n'empêche jamais le build.
+      - name: Sonde IRM
+        continue-on-error: true
+        run: |
+          START=$(date -u -d '3 days ago' +%Y-%m-%dT00:00:00Z)
+          END=$(date -u +%Y-%m-%dT00:00:00Z)
+          curl -sS -G "https://opendata.meteo.be/service/aws/wfs" \
+            --data-urlencode "service=WFS" --data-urlencode "version=2.0.0" --data-urlencode "request=GetFeature" \
+            --data-urlencode "typeNames=aws:aws_1hour" --data-urlencode "outputFormat=application/json" \
+            --data-urlencode "count=5000" --data-urlencode "sortBy=timestamp" \
+            --data-urlencode "cql_filter=code = 6484 AND timestamp >= $START AND timestamp <= $END" -o irm.json
+          python3 - <<'EOF'
+          import json
+          d = json.load(open("irm.json"))
+          f = d.get("features", [])
+          p = f[0]["properties"] if f else {}
+          q = f[-1]["properties"] if f else {}
+          msg = (f"{len(f)} heures | cles: {sorted(p.keys())} | premier: {p.get('timestamp')} "
+                 f"T={p.get('temp_dry_shelter_avg')} P={p.get('precip_quantity')} | dernier: {q.get('timestamp')} "
+                 f"T={q.get('temp_dry_shelter_avg')} P={q.get('precip_quantity')}")
+          print("::notice title=Sonde IRM::" + msg)
+          EOF
+
       # En cas d'échec, remonte les erreurs comme annotations lisibles sur le commit.
       - name: Résumer les erreurs
         if: failure()
         run: |
           set +e
           esc() { sed -e 's/%/%25/g' | sed -e ':a;N;$!ba;s/\r/%0D/g;s/\n/%0A/g'; }
+          failed=$(grep -A4 -E ' FAILED$' build.log | head -40 | esc)
+          if [ -n "$failed" ]; then echo "::error title=Tests::$failed"; fi
           grep -E '^e: ' build.log | head -15 | while IFS= read -r line; do
             echo "::error title=Kotlin::$(printf '%s' "$line" | esc)"
           done

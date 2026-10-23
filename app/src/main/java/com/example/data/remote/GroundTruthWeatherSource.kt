@@ -20,6 +20,15 @@ data class GroundTruthDailyObservation(
 )
 
 /**
+ * Observations du « réel » accompagnées du nom de la source réellement utilisée pour ce lieu
+ * (ex. « Station IRM Buzenol · à 19 km » ou la réanalyse en repli).
+ */
+data class GroundTruthResult(
+    val sourceDisplayName: String,
+    val observations: Map<String, GroundTruthDailyObservation>
+)
+
+/**
  * Module remplaçable pour la source du « réel » servant de référence aux calculs de fiabilité.
  * Permet de brancher ultérieurement des observations de stations météo physiques (Météo-France,
  * Infoclimat, Netatmo, etc.) sans modifier le moteur de fiabilité ni l'UI.
@@ -38,6 +47,17 @@ interface GroundTruthWeatherSource {
         startDate: LocalDate,
         endDate: LocalDate
     ): Map<String, GroundTruthDailyObservation>
+
+    /** Comme [fetchDailyObservations], en indiquant la source effectivement utilisée pour ce lieu. */
+    suspend fun fetchDailyObservationsWithSource(
+        latitude: Double,
+        longitude: Double,
+        startDate: LocalDate,
+        endDate: LocalDate
+    ): GroundTruthResult = GroundTruthResult(
+        sourceDisplayName = sourceDisplayName,
+        observations = fetchDailyObservations(latitude, longitude, startDate, endDate)
+    )
 }
 
 /**
@@ -48,7 +68,7 @@ class OpenMeteoHistoricalReanalysisSource(
     private val httpClient: OkHttpClient
 ) : GroundTruthWeatherSource {
 
-    override val sourceDisplayName: String = "Open-Meteo Historical Weather API (Réanalyse)"
+    override val sourceDisplayName: String = REANALYSIS_SOURCE_NAME
 
     override suspend fun fetchDailyObservations(
         latitude: Double,
@@ -122,3 +142,6 @@ class OpenMeteoHistoricalReanalysisSource(
         return result
     }
 }
+
+/** Nom affiché quand la référence est la réanalyse : c'est un modèle, pas une mesure. */
+const val REANALYSIS_SOURCE_NAME = "Réanalyse Open-Meteo (ERA5/IFS, modèle)"
