@@ -106,6 +106,11 @@ import com.example.ui.theme.TextSecondary
 import com.example.ui.theme.VioletWind
 import java.util.Locale
 
+
+/** Formate une valeur météo, ou « — » si les modèles ne la fournissent pas. */
+private fun orDash(value: Double?, pattern: String): String =
+    value?.let { String.format(Locale.FRANCE, pattern, it) } ?: "—"
+
 @Composable
 fun DashboardScreen(
     dashboard: CompleteWeatherDashboard?,
@@ -153,13 +158,13 @@ fun DashboardScreen(
                     Text(
                         text = String.format(
                             Locale.FRANCE,
-                            "• Précipitations : %.1f mm/h (%s)\n• Ressenti : %.1f °C / Réel %.1f °C (%s)\n• Rafales : %.0f km/h (%s)\n• Lumière : %s",
+                            "• Précipitations : %.1f mm/h (%s)\n• Ressenti : %.1f °C / Réel %.1f °C (%s)\n• Rafales : %s km/h (%s)\n• Lumière : %s",
                             score.precipMm,
                             score.precipLevel.labelFr,
                             score.apparentTempC,
                             score.temperatureC,
                             score.apparentTempLevel.labelFr,
-                            score.gustsKmh,
+                            orDash(score.gustsKmh, "%.0f"),
                             score.gustsLevel.labelFr,
                             score.lightLevel.labelFr
                         ),
@@ -260,7 +265,7 @@ fun DashboardScreen(
             item {
                 UvAirPollenBanner(
                     airQuality = dashboard.airQuality,
-                    todayUvMax = dashboard.daily7Days.firstOrNull()?.uvIndexMax ?: 0.0
+                    todayUvMax = dashboard.daily7Days.firstOrNull()?.uvIndexMax
                 )
             }
 
@@ -532,13 +537,13 @@ private fun TelemetryHeaderCard(
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         WeatherConditionIcon(
-                            weatherCode = currentHourPt?.weatherCode ?: 1,
+                            weatherCode = currentHourPt?.weatherCode,
                             isDay = currentHourPt?.isDay ?: true,
                             modifier = Modifier.size(40.dp)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = String.format(Locale.FRANCE, "%.1f°C", currentHourPt?.temperatureC ?: 15.0),
+                            text = "${orDash(currentHourPt?.temperatureC, "%.1f")}°C",
                             style = MaterialTheme.typography.displayMedium,
                             color = AmberTemp
                         )
@@ -546,7 +551,7 @@ private fun TelemetryHeaderCard(
                         Column {
                             Text(
                                 text = wmoCodeToLabelFr(
-                                    currentHourPt?.weatherCode ?: 1,
+                                    currentHourPt?.weatherCode,
                                     currentHourPt?.isDay ?: true
                                 ),
                                 style = MaterialTheme.typography.labelLarge,
@@ -554,13 +559,8 @@ private fun TelemetryHeaderCard(
                                 maxLines = 1
                             )
                             Text(
-                                text = String.format(
-                                    Locale.FRANCE,
-                                    "Ress. %.1f° · %.0f°/%.0f°",
-                                    currentHourPt?.apparentTemperatureC ?: 15.0,
-                                    todayDaily?.tempMinC ?: 8.0,
-                                    todayDaily?.tempMaxC ?: 18.0
-                                ),
+                                text = "Ress. ${orDash(currentHourPt?.apparentTemperatureC, "%.1f")}° · " +
+                                    "${orDash(todayDaily?.tempMinC, "%.0f")}°/${orDash(todayDaily?.tempMaxC, "%.0f")}°",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = GoldApparentTemp,
                                 maxLines = 1
@@ -570,21 +570,13 @@ private fun TelemetryHeaderCard(
 
                     Column(horizontalAlignment = Alignment.End) {
                         Text(
-                            text = String.format(
-                                Locale.FRANCE,
-                                "Pluie %.1f mm",
-                                todayDaily?.precipitationSumMm ?: 0.0
-                            ),
+                            text = "Pluie ${orDash(todayDaily?.precipitationSumMm, "%.1f")} mm",
                             style = MaterialTheme.typography.labelLarge,
                             color = CyanPrecip
                         )
                         Text(
-                            text = String.format(
-                                Locale.FRANCE,
-                                "Vent %.0f (raf. %.0f)",
-                                currentHourPt?.windSpeedKmh ?: 0.0,
-                                currentHourPt?.windGustsKmh ?: 0.0
-                            ),
+                            text = "Vent ${orDash(currentHourPt?.windSpeedKmh, "%.0f")} " +
+                                "(raf. ${orDash(currentHourPt?.windGustsKmh, "%.0f")})",
                             style = MaterialTheme.typography.labelSmall,
                             color = VioletWind
                         )
@@ -638,7 +630,7 @@ private fun TelemetryHeaderCard(
 @Composable
 private fun UvAirPollenBanner(
     airQuality: AirQualitySummary,
-    todayUvMax: Double
+    todayUvMax: Double?
 ) {
     Row(
         modifier = Modifier
@@ -672,9 +664,9 @@ private fun UvAirPollenBanner(
                 val uvCurr = airQuality.uvIndexCurrent
                 Text(
                     text = if (uvCurr != null) {
-                        String.format(Locale.FRANCE, "%.1f (Max %.0f)", uvCurr, todayUvMax)
+                        String.format(Locale.FRANCE, "%.1f (Max %s)", uvCurr, orDash(todayUvMax, "%.0f"))
                     } else {
-                        String.format(Locale.FRANCE, "Max %.1f", todayUvMax)
+                        "Max ${orDash(todayUvMax, "%.1f")}"
                     },
                     style = MaterialTheme.typography.labelSmall,
                     color = TextPrimary,
@@ -785,13 +777,9 @@ private fun WorkCommuteTelemetryCard(status: WorkCommuteStatus) {
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = String.format(
-                            Locale.FRANCE,
-                            "%.1f°C · HR %d%% · Vis %.0fkm",
-                            slice.minTempC,
-                            slice.maxHumidityPercent,
-                            (slice.minVisibilityMeters / 1000.0).coerceAtMost(99.0)
-                        ),
+                        text = "${orDash(slice.minTempC, "%.1f")}°C · " +
+                            "HR ${slice.maxHumidityPercent?.let { "$it%" } ?: "—"} · " +
+                            "Vis ${orDash(slice.minVisibilityMeters?.let { (it / 1000.0).coerceAtMost(99.0) }, "%.0f")}km",
                         style = MaterialTheme.typography.labelSmall,
                         color = TextSecondary,
                         maxLines = 1,
@@ -960,9 +948,9 @@ private fun BikeWindTelemetryCard(status: BikeWindStatus) {
                 Text(
                     text = String.format(
                         Locale.FRANCE,
-                        "Vent moyen : %.0f km/h · Rafales : %.0f km/h",
+                        "Vent moyen : %.0f km/h · Rafales : %s km/h",
                         status.windSpeedKmh,
-                        status.gustsKmh
+                        orDash(status.gustsKmh, "%.0f")
                     ),
                     style = MaterialTheme.typography.labelLarge,
                     color = MagentaGusts
@@ -1100,10 +1088,10 @@ private fun RunningScoreSection(
                     Text(
                         text = String.format(
                             Locale.FRANCE,
-                            "%.0f°C · %.1fmm · %.0fkm/h",
+                            "%.0f°C · %.1fmm · %skm/h",
                             slot.apparentTempC,
                             slot.precipMm,
-                            slot.gustsKmh
+                            orDash(slot.gustsKmh, "%.0f")
                         ),
                         style = MaterialTheme.typography.labelSmall,
                         color = TextPrimary,
@@ -1167,7 +1155,7 @@ private fun WeekendHighlightBlock(weekendDays: List<DailyWeatherPoint>) {
                     color = AmberTemp
                 )
                 Text(
-                    text = String.format(Locale.FRANCE, "Pluie : %.1f mm · Raf %.0f", day.precipitationSumMm, day.windGustsMaxKmh),
+                    text = String.format(Locale.FRANCE, "Pluie : %.1f mm · Raf %s", day.precipitationSumMm, orDash(day.windGustsMaxKmh, "%.0f")),
                     style = MaterialTheme.typography.labelSmall,
                     color = CyanPrecip,
                     maxLines = 1

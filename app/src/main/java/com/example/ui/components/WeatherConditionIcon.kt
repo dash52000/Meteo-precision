@@ -44,8 +44,9 @@ fun resolveWeatherGlyph(weatherCode: Int, isDay: Boolean = true): WeatherGlyphTy
     }
 }
 
-fun wmoCodeToLabelFr(weatherCode: Int, isDay: Boolean = true): String {
+fun wmoCodeToLabelFr(weatherCode: Int?, isDay: Boolean = true): String {
     return when (weatherCode) {
+        null -> "Temps n.d."
         0 -> if (isDay) "Ensoleillé" else "Nuit claire"
         1 -> if (isDay) " Soleil dominant" else "Peu nuageux"
         2 -> if (isDay) "Soleil nuageux" else "Éclaircies nocturnes"
@@ -72,10 +73,15 @@ fun wmoCodeToLabelFr(weatherCode: Int, isDay: Boolean = true): String {
  */
 @Composable
 fun WeatherConditionIcon(
-    weatherCode: Int,
+    weatherCode: Int?,
     isDay: Boolean = true,
     modifier: Modifier = Modifier
 ) {
+    // Code météo non fourni : emplacement vide plutôt qu'une icône inventée
+    if (weatherCode == null) {
+        Canvas(modifier = modifier) {}
+        return
+    }
     val glyph = resolveWeatherGlyph(weatherCode, isDay)
     Canvas(modifier = modifier) {
         val w = size.width

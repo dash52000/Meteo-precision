@@ -78,14 +78,23 @@ object RunningScoreEngine {
                 else -> ScoreLevel.GREEN
             }
 
-            // 3. Rafales
+            // 3. Rafales. Si le modèle ne fournit pas les rafales, on évalue sur le vent moyen
+            // (borne basse réelle des rafales) et le motif le signale.
+            val gustsKnown = pt.windGustsKmh != null
+            val gustsForScore = pt.windGustsKmh ?: pt.windSpeedKmh
             val gustsLevel = when {
-                pt.windGustsKmh > settings.gustsOrangeMaxKmh -> {
-                    reasons.add(String.format("Rafales violentes (%.0f km/h)", pt.windGustsKmh))
+                gustsForScore > settings.gustsOrangeMaxKmh -> {
+                    reasons.add(
+                        if (gustsKnown) String.format("Rafales violentes (%.0f km/h)", gustsForScore)
+                        else String.format("Vent fort (%.0f km/h, rafales n.d.)", gustsForScore)
+                    )
                     ScoreLevel.RED
                 }
-                pt.windGustsKmh >= settings.gustsGreenMaxKmh -> {
-                    reasons.add(String.format("Rafales sensibles (%.0f km/h)", pt.windGustsKmh))
+                gustsForScore >= settings.gustsGreenMaxKmh -> {
+                    reasons.add(
+                        if (gustsKnown) String.format("Rafales sensibles (%.0f km/h)", gustsForScore)
+                        else String.format("Vent sensible (%.0f km/h, rafales n.d.)", gustsForScore)
+                    )
                     ScoreLevel.ORANGE
                 }
                 else -> ScoreLevel.GREEN
@@ -102,7 +111,7 @@ object RunningScoreEngine {
             }
 
             // 5. Orage (codes WMO 95, 96, 99)
-            val isStorm = pt.weatherCode in setOf(95, 96, 99)
+            val isStorm = pt.weatherCode?.let { it in setOf(95, 96, 99) } == true
             val stormLevel = if (isStorm) {
                 reasons.add("Risque d'orage")
                 ScoreLevel.RED
@@ -133,7 +142,7 @@ object RunningScoreEngine {
             val idealFeelsLike = (settings.feelsLikeGreenMinC + settings.feelsLikeGreenMaxC) / 2.0
             val tempDeviationPenalty = abs(pt.apparentTemperatureC - idealFeelsLike) * 1.4
             val precipPenalty = pt.precipitationMm * 35.0
-            val windPenalty = (pt.windGustsKmh / 10.0) * 2.5
+            val windPenalty = (gustsForScore / 10.0) * 2.5
             val nightPenalty = if (!pt.isDay) 12.0 else 0.0
             val severityBasePenalty = worstLevel.severityRank * 100.0
             val rankScore = 1000.0 - severityBasePenalty - tempDeviationPenalty - precipPenalty - windPenalty - nightPenalty
@@ -203,15 +212,18 @@ object RunningScoreEngine {
         fun buildSlice(label: String, startH: Int, endH: Int): CommuteSliceReport {
             val s = startH.coerceIn(0, 23)
             val e = endH.coerceIn(s, 23)
-            val slice = todayHours.filter { it.hourOfDay in s..e }.ifEmpty { todayHours.take(2) }
-            val minTemp = slice.minOfOrNull { it.temperatureC } ?: 10.0
-            val maxHum = slice.maxOfOrNull { it.relativeHumidityPercent } ?: 50
+            val slice = todayHours.filter { it.hourOfDay in s..e }
+            // null = aucune donnée disponible sur le créneau (affiché « — »)
+            val minTemp = slice.minOfOrNull { it.temperatureC }
+            val maxHum = slice.mapNotNull { it.relativeHumidityPercent }.maxOrNull()
             val totalPrecip = slice.sumOf { it.precipitationMm }
-            val minVis = slice.minOfOrNull { it.visibilityMeters } ?: 10000.0
+            val minVis = slice.mapNotNull { it.visibilityMeters }.minOrNull()
             val hasFogCode = slice.any { it.weatherCode == 45 || it.weatherCode == 48 }
-            val fogRisk = minVis < 1000.0 || hasFogCode
+            val fogRisk = (minVis != null && minVis < 1000.0) || hasFogCode
+            // Humidité inconnue : seul le critère « précipitations » peut déclencher l'alerte
             val blackIceRisk = slice.any {
-                it.temperatureC <= 1.0 && (it.relativeHumidityPercent >= 80 || it.precipitationMm > 0.0)
+                it.temperatureC <= 1.0 &&
+                    ((it.relativeHumidityPercent ?: 0) >= 80 || it.precipitationMm > 0.0)
             }
             return CommuteSliceReport(
                 label = label,
@@ -264,8 +276,9 @@ object RunningScoreEngine {
      * Indicateur spécifique au lieu « Vélo » :
      * Force et direction du vent (flèche), rafales, et conseil pour choisir le sens de la boucle.
      */
-    fun computeBikeWindStatus(currentHourPoint: HourlyWeatherPoint): BikeWindStatus {
-        val deg = ((currentHourPoint.windDirectionDeg % 360) + 360) % 360
+    fun computeBikeWindStatus(currentHourPoint: HourlyWeatherPoint): BikeWindStatus? {
+        val rawDeg = currentHourPoint.windDirectionDeg ?: return null
+        val deg = ((rawDeg % 360) + 360) % 360
         val cardinal = degreeToCardinalFr(deg)
         val advice = "Partir cap $cardinal (face au vent à l'aller, vent de dos au retour)"
         return BikeWindStatus(

@@ -172,8 +172,8 @@ fun Precipitation3HoursChart(
 @Composable
 fun Hourly24hMultiCurveChart(
     hours: List<HourlyWeatherPoint>,
-    sunriseFraction: Float,
-    sunsetFraction: Float,
+    sunriseFraction: Float?,
+    sunsetFraction: Float?,
     sunriseLabel: String,
     sunsetLabel: String,
     daylightDurationLabel: String,
@@ -193,7 +193,7 @@ fun Hourly24hMultiCurveChart(
             .coerceAtLeast(minTemp + 6.0)
     }
     val maxWind = remember(hours) {
-        (hours.maxOf { maxOf(it.windSpeedKmh, it.windGustsKmh) } * 1.15).coerceAtLeast(30.0)
+        (hours.maxOf { maxOf(it.windSpeedKmh, it.windGustsKmh ?: it.windSpeedKmh) } * 1.15).coerceAtLeast(30.0)
     }
     val maxPrecip = remember(hours) {
         (hours.maxOf { it.precipitationMm } * 1.3).coerceAtLeast(2.0)
@@ -295,9 +295,9 @@ fun Hourly24hMultiCurveChart(
                 Text(
                     text = String.format(
                         Locale.FRANCE,
-                        "Vent %.0f km/h · Raf. %.0f km/h",
+                        "Vent %.0f km/h · Raf. %s km/h",
                         selectedPoint.windSpeedKmh,
-                        selectedPoint.windGustsKmh
+                        selectedPoint.windGustsKmh?.let { String.format(Locale.FRANCE, "%.0f", it) } ?: "—"
                     ),
                     style = MaterialTheme.typography.labelSmall,
                     color = MagentaGusts
@@ -364,8 +364,9 @@ fun Hourly24hMultiCurveChart(
                 fun xForHour(hFraction: Float): Float =
                     ((hFraction / 23f) * w).coerceIn(0f, w)
 
-                val sunriseX = xForHour(sunriseFraction)
-                val sunsetX = xForHour(sunsetFraction)
+                // Lever / coucher inconnus : pas d'ombrage de nuit inventé
+                val sunriseX = sunriseFraction?.let { xForHour(it) } ?: 0f
+                val sunsetX = sunsetFraction?.let { xForHour(it) } ?: w
                 if (sunriseX > 0f) {
                     drawRect(
                         color = NightShadeOverlay,
@@ -407,13 +408,21 @@ fun Hourly24hMultiCurveChart(
                     }
                 }
 
-                fun buildSeriesPath(selector: (HourlyWeatherPoint) -> Double, minVal: Double, maxVal: Double): Path {
+                // Une valeur absente (null) coupe la courbe au lieu d'être inventée
+                fun buildSeriesPath(selector: (HourlyWeatherPoint) -> Double?, minVal: Double, maxVal: Double): Path {
                     val path = Path()
+                    var penDown = false
                     hours.forEachIndexed { idx, pt ->
-                        val x = (idx.toFloat() / n) * w
-                        val norm = ((selector(pt) - minVal) / (maxVal - minVal)).toFloat().coerceIn(0f, 1f)
-                        val y = chartH * (1f - (0.08f + norm * 0.84f))
-                        if (idx == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                        val value = selector(pt)
+                        if (value == null) {
+                            penDown = false
+                        } else {
+                            val x = (idx.toFloat() / n) * w
+                            val norm = ((value - minVal) / (maxVal - minVal)).toFloat().coerceIn(0f, 1f)
+                            val y = chartH * (1f - (0.08f + norm * 0.84f))
+                            if (penDown) path.lineTo(x, y) else path.moveTo(x, y)
+                            penDown = true
+                        }
                     }
                     return path
                 }

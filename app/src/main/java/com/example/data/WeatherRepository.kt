@@ -227,10 +227,14 @@ class WeatherRepository(
 
         val effectiveForecastJson: String
         val effectiveAqJson: String?
+        val dataFetchedAtMillis: Long
+        val fromOfflineCache: Boolean
 
         if (freshForecastJson != null) {
             effectiveForecastJson = freshForecastJson
             effectiveAqJson = freshAqJson
+            dataFetchedAtMillis = System.currentTimeMillis()
+            fromOfflineCache = false
             weatherDao.saveForecastCache(
                 WeatherForecastCacheEntity(
                     cacheKey = cacheKey,
@@ -244,6 +248,8 @@ class WeatherRepository(
             if (cached != null) {
                 effectiveForecastJson = cached.rawForecastJson
                 effectiveAqJson = cached.rawAirQualityJson
+                dataFetchedAtMillis = cached.updatedAtMillis
+                fromOfflineCache = true
             } else {
                 throw IllegalStateException("Impossible de joindre Open-Meteo et aucun cache local disponible pour ${location.name}.")
             }
@@ -258,14 +264,15 @@ class WeatherRepository(
             settings = settings,
             autoRecommendation = autoRec,
             manualModel = manualModel,
-            nowDateTime = LocalDateTime.now()
+            nowDateTime = LocalDateTime.now(),
+            dataFetchedAtMillis = dataFetchedAtMillis,
+            fromOfflineCache = fromOfflineCache
         )
 
         // Si le lieu est enregistré en base, mettre à jour son résumé pour l'écran Liste des lieux
         if (location.id != null) {
             val nowHour = LocalDateTime.now().hour
             val currentPt = dashboard.hourlyToday24h.find { it.hourOfDay == nowHour }
-                ?: dashboard.hourlyToday24h.firstOrNull()
             val todayDaily = dashboard.daily7Days.firstOrNull()
             val specialBadge = when (location.type) {
                 LocationType.WORK -> {
@@ -287,7 +294,13 @@ class WeatherRepository(
                 LocationType.BIKE -> {
                     val b = dashboard.bikeWindStatus
                     if (b != null) {
-                        String.format(Locale.FRANCE, "Vent %s %.0f km/h (raf. %.0f)", b.windFromCardinal, b.windSpeedKmh, b.gustsKmh)
+                        String.format(
+                            Locale.FRANCE,
+                            "Vent %s %.0f km/h (raf. %s)",
+                            b.windFromCardinal,
+                            b.windSpeedKmh,
+                            b.gustsKmh?.let { String.format(Locale.FRANCE, "%.0f", it) } ?: "n.d."
+                        )
                     } else null
                 }
                 else -> {

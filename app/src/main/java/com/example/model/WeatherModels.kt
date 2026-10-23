@@ -118,11 +118,12 @@ data class HourlyWeatherPoint(
     val apparentTemperatureC: Double,
     val precipitationMm: Double,
     val windSpeedKmh: Double,
-    val windGustsKmh: Double,
-    val windDirectionDeg: Int,
-    val visibilityMeters: Double,
-    val relativeHumidityPercent: Int,
-    val weatherCode: Int,
+    // null = donnée non fournie par les modèles interrogés (jamais de valeur inventée)
+    val windGustsKmh: Double?,
+    val windDirectionDeg: Int?,
+    val visibilityMeters: Double?,
+    val relativeHumidityPercent: Int?,
+    val weatherCode: Int?,
     val isDay: Boolean,
     val tempModelUsed: WeatherModel,
     val precipModelUsed: WeatherModel
@@ -137,16 +138,17 @@ data class DailyWeatherPoint(
     val tempMinC: Double,
     val tempMaxC: Double,
     val precipitationSumMm: Double,
-    val windSpeedMaxKmh: Double,
-    val windGustsMaxKmh: Double,
-    val dominantWindDirectionDeg: Int,
+    // null = donnée non fournie par les modèles interrogés
+    val windSpeedMaxKmh: Double?,
+    val windGustsMaxKmh: Double?,
+    val dominantWindDirectionDeg: Int?,
     val sunriseIso: String,
     val sunsetIso: String,
     val sunriseLabel: String,
     val sunsetLabel: String,
     val daylightDurationHoursLabel: String,
-    val uvIndexMax: Double,
-    val weatherCode: Int,
+    val uvIndexMax: Double?,
+    val weatherCode: Int?,
     val tempModelUsed: WeatherModel,
     val precipModelUsed: WeatherModel
 )
@@ -187,10 +189,10 @@ data class AirQualitySummary(
 data class CommuteSliceReport(
     val label: String,
     val windowText: String,
-    val minTempC: Double,
-    val maxHumidityPercent: Int,
+    val minTempC: Double?,
+    val maxHumidityPercent: Int?,
     val totalPrecipMm: Double,
-    val minVisibilityMeters: Double,
+    val minVisibilityMeters: Double?,
     val hasFogRisk: Boolean,
     val hasBlackIceRisk: Boolean
 )
@@ -209,7 +211,7 @@ data class TrailConditionStatus(
 
 data class BikeWindStatus(
     val windSpeedKmh: Double,
-    val gustsKmh: Double,
+    val gustsKmh: Double?,
     val windDirectionDeg: Int,
     val windFromCardinal: String,
     val loopAdviceFr: String
@@ -230,8 +232,8 @@ data class HourlyRunningScore(
     val temperatureC: Double,
     val apparentTempC: Double,
     val precipMm: Double,
-    val gustsKmh: Double,
-    val weatherCode: Int = 1,
+    val gustsKmh: Double?,
+    val weatherCode: Int? = null,
     val isDay: Boolean = true,
     val isRealisticSlot: Boolean
 )
@@ -310,8 +312,8 @@ data class CompleteWeatherDashboard(
     val todaySunriseLabel: String,
     val todaySunsetLabel: String,
     val todayDaylightDurationLabel: String,
-    val todaySunriseHourFraction: Float,
-    val todaySunsetHourFraction: Float,
+    val todaySunriseHourFraction: Float?,
+    val todaySunsetHourFraction: Float?,
     val runningScores6to21h: List<HourlyRunningScore>,
     val top3RunningSlots: List<HourlyRunningScore>,
     val weekendDays: List<DailyWeatherPoint>,
