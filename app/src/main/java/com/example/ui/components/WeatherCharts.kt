@@ -40,8 +40,13 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.ExperimentalTextApi
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.example.model.ForecastVsRealDayPoint
 import com.example.model.HourlyWeatherPoint
 import com.example.model.Minutely15Point
@@ -168,7 +173,7 @@ fun Precipitation3HoursChart(
  * Courbes superposées de température, ressenti, précipitations, vent et rafales.
  * Nuits grisées selon le lever et le coucher du soleil + durée du jour.
  */
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class, ExperimentalTextApi::class)
 @Composable
 fun Hourly24hMultiCurveChart(
     hours: List<HourlyWeatherPoint>,
@@ -198,6 +203,7 @@ fun Hourly24hMultiCurveChart(
     val maxPrecip = remember(hours) {
         (hours.maxOf { it.precipitationMm } * 1.3).coerceAtLeast(2.0)
     }
+    val textMeasurer = rememberTextMeasurer()
 
     Column(modifier = modifier.fillMaxWidth()) {
         // Bandeau Lever / Coucher du soleil & Durée du jour optimisé 360dp
@@ -271,16 +277,24 @@ fun Hourly24hMultiCurveChart(
                         overflow = TextOverflow.Ellipsis
                     )
                 }
-                Text(
-                    text = String.format(
-                        Locale.FRANCE,
-                        "T° %.1f° (Ress. %.1f°)",
-                        selectedPoint.temperatureC,
-                        selectedPoint.apparentTemperatureC
-                    ),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = AmberTemp
-                )
+                // Chaque valeur dans la couleur de sa courbe
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = String.format(Locale.FRANCE, "T° %.1f°", selectedPoint.temperatureC),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = AmberTemp
+                    )
+                    Text(
+                        text = " · ",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = TextMuted
+                    )
+                    Text(
+                        text = String.format(Locale.FRANCE, "Ressenti %.1f°", selectedPoint.apparentTemperatureC),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = GoldApparentTemp
+                    )
+                }
             }
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -292,16 +306,23 @@ fun Hourly24hMultiCurveChart(
                     style = MaterialTheme.typography.labelSmall,
                     color = CyanPrecip
                 )
-                Text(
-                    text = String.format(
-                        Locale.FRANCE,
-                        "Vent %.0f km/h · Raf. %s km/h",
-                        selectedPoint.windSpeedKmh,
-                        selectedPoint.windGustsKmh?.let { String.format(Locale.FRANCE, "%.0f", it) } ?: "—"
-                    ),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MagentaGusts
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = String.format(Locale.FRANCE, "Vent %.0f km/h", selectedPoint.windSpeedKmh),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = VioletWind
+                    )
+                    Text(
+                        text = " · ",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TextMuted
+                    )
+                    Text(
+                        text = "Raf. ${selectedPoint.windGustsKmh?.let { String.format(Locale.FRANCE, "%.0f", it) } ?: "—"} km/h",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MagentaGusts
+                    )
+                }
             }
         }
 
@@ -382,6 +403,8 @@ fun Hourly24hMultiCurveChart(
                     )
                 }
 
+                // Lignes de repère + échelles : °C à gauche (températures), km/h à droite (vent)
+                val axisStyle = TextStyle(fontSize = 9.sp)
                 for (frac in listOf(0.2f, 0.5f, 0.8f)) {
                     val y = chartH * frac
                     drawLine(
@@ -390,6 +413,19 @@ fun Hourly24hMultiCurveChart(
                         end = Offset(w, y),
                         strokeWidth = 1f
                     )
+                    val norm = ((1f - frac) - 0.08f) / 0.84f
+                    val tempAtLine = minTemp + norm * (maxTemp - minTemp)
+                    val windAtLine = norm * maxWind
+                    val tempLabel = textMeasurer.measure(
+                        String.format(Locale.FRANCE, "%.0f°", tempAtLine),
+                        axisStyle.copy(color = AmberTemp)
+                    )
+                    drawText(tempLabel, topLeft = Offset(2f, y - tempLabel.size.height))
+                    val windLabel = textMeasurer.measure(
+                        String.format(Locale.FRANCE, "%.0f km/h", windAtLine),
+                        axisStyle.copy(color = VioletWind)
+                    )
+                    drawText(windLabel, topLeft = Offset(w - windLabel.size.width - 2f, y - windLabel.size.height))
                 }
 
                 val slotW = w / hours.size.coerceAtLeast(1)
@@ -468,13 +504,19 @@ fun Hourly24hMultiCurveChart(
                     end = Offset(selX, chartH),
                     strokeWidth = 1.5.dp.toPx()
                 )
-                val selTempNorm = ((selectedPoint.temperatureC - minTemp) / (maxTemp - minTemp)).toFloat().coerceIn(0f, 1f)
-                val selTempY = chartH * (1f - (0.08f + selTempNorm * 0.84f))
-                drawCircle(
-                    color = AmberTemp,
-                    radius = 5.dp.toPx(),
-                    center = Offset(selX, selTempY)
-                )
+                // Un point sur chaque courbe à l'heure du curseur
+                fun yFor(value: Double, minVal: Double, maxVal: Double): Float {
+                    val norm = ((value - minVal) / (maxVal - minVal)).toFloat().coerceIn(0f, 1f)
+                    return chartH * (1f - (0.08f + norm * 0.84f))
+                }
+                fun marker(color: Color, y: Float, radiusDp: Float) {
+                    drawCircle(color = SlateSurfaceElevated, radius = (radiusDp + 1.5f).dp.toPx(), center = Offset(selX, y))
+                    drawCircle(color = color, radius = radiusDp.dp.toPx(), center = Offset(selX, y))
+                }
+                marker(VioletWind, yFor(selectedPoint.windSpeedKmh, 0.0, maxWind), 4f)
+                selectedPoint.windGustsKmh?.let { marker(MagentaGusts, yFor(it, 0.0, maxWind), 4f) }
+                marker(GoldApparentTemp, yFor(selectedPoint.apparentTemperatureC, minTemp, maxTemp), 4.5f)
+                marker(AmberTemp, yFor(selectedPoint.temperatureC, minTemp, maxTemp), 5f)
             }
 
             Row(

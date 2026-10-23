@@ -203,10 +203,10 @@ fun ReliabilityScreen(
                         modifier = Modifier.padding(12.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Row(
+                        // Titre puis badge en dessous : le badge n'est plus écrasé lettre par lettre
+                        Column(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             Text(
                                 text = "Choix Automatique du Meilleur Modèle",
@@ -223,7 +223,9 @@ fun ReliabilityScreen(
                                 Text(
                                     text = if (isAutoActive) "Mode Auto Actif" else "Réactiver Mode Auto",
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = if (isAutoActive) ScoreGreen else CyanPrecip
+                                    color = if (isAutoActive) ScoreGreen else CyanPrecip,
+                                    maxLines = 1,
+                                    softWrap = false
                                 )
                             }
                         }

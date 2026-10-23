@@ -23,7 +23,7 @@ object ReliabilityAndAutoModelEngine {
     private const val RAIN_DETECTION_THRESHOLD_MM = 0.2
 
     /** Version de la méthode de calcul : un rapport en cache d'une autre version est recalculé. */
-    private const val METHOD_VERSION = 2
+    private const val METHOD_VERSION = 3
 
     /**
      * Calcule la fiabilité des prévisions sur une fenêtre glissante de 30 jours en comparant
@@ -99,7 +99,7 @@ object ReliabilityAndAutoModelEngine {
         }
 
         val autoRec = selectBestModelsFromMetrics(allMetrics)
-        val verdict = buildVerdictSentence(locationName, allMetrics)
+        val verdict = buildVerdictSentence(locationName, allMetrics, autoRec)
 
         LocationReliabilityReport(
             locationKey = locationKey,
@@ -239,45 +239,41 @@ object ReliabilityAndAutoModelEngine {
     }
 
     /**
-     * Génère la phrase de verdict synthétique en français.
-     * Exemple : « À Saulnes, ICON-D2 se trompe le moins à J+1 sur la température (±0,8 °C) et AROME est le plus juste sur la pluie (90 %). »
+     * Phrase de verdict en français, cohérente avec le choix automatique : elle nomme les modèles
+     * réellement retenus pour 0–48 h et donne leurs erreurs mesurées à J+1.
+     * Exemple : « À Saulnes, le mode auto retient ICON-D2 pour la température (erreur moy. 0,9 °C à J+1)
+     * et ECMWF IFS pour la pluie (97 % pluie/sec juste, ±0,8 mm/j à J+1). »
      */
-    fun buildVerdictSentence(locationName: String, metrics: List<ModelLeadReliability>): String {
-        val j1 = metrics.filter { it.leadDays == 1 }
-        if (j1.isEmpty()) {
+    fun buildVerdictSentence(
+        locationName: String,
+        metrics: List<ModelLeadReliability>,
+        autoRecommendation: AutoModelRecommendation
+    ): String {
+        if (metrics.isEmpty()) {
             return "À $locationName, les données historiques en cours de consolidation utilisent ECMWF IFS et AROME par défaut."
         }
-        val bestTempJ1 = j1.minByOrNull { it.tempMaeC }
-        val bestRainJ1 = j1.maxWithOrNull(
-            compareBy<ModelLeadReliability> { it.rainNoRainAccuracyPercent }
-                .thenByDescending { -it.precipDailyMaeMm }
-        )
+        val tempModel = autoRecommendation.tempModel0to48h
+        val rainModel = autoRecommendation.precipModel0to48h
+        val tempJ1 = metrics.firstOrNull { it.model == tempModel && it.leadDays == 1 }
+        val rainJ1 = metrics.firstOrNull { it.model == rainModel && it.leadDays == 1 }
 
-        val tempPart = if (bestTempJ1 != null) {
+        val tempPart = if (tempJ1 != null) {
+            String.format(Locale.FRANCE, "%s pour la température (erreur moy. %.1f °C à J+1)", tempModel.shortBadge, tempJ1.tempMaeC)
+        } else {
+            "${tempModel.shortBadge} pour la température"
+        }
+        val rainPart = if (rainJ1 != null) {
             String.format(
                 Locale.FRANCE,
-                "À %s, %s se trompe le moins à J+1 sur la température (erreur moy. %.1f °C)",
-                locationName,
-                bestTempJ1.model.shortBadge,
-                bestTempJ1.tempMaeC
+                "%s pour la pluie (%.0f %% pluie/sec juste, ±%.1f mm/j à J+1)",
+                rainModel.shortBadge,
+                rainJ1.rainNoRainAccuracyPercent,
+                rainJ1.precipDailyMaeMm
             )
         } else {
-            "À $locationName"
+            "${rainModel.shortBadge} pour la pluie"
         }
-
-        val rainPart = if (bestRainJ1 != null) {
-            String.format(
-                Locale.FRANCE,
-                " et %s domine sur la pluie (%.0f %% pluie/sec juste, ±%.1f mm/j).",
-                bestRainJ1.model.shortBadge,
-                bestRainJ1.rainNoRainAccuracyPercent,
-                bestRainJ1.precipDailyMaeMm
-            )
-        } else {
-            "."
-        }
-
-        return tempPart + rainPart
+        return "À $locationName, le mode auto retient $tempPart et $rainPart."
     }
 
     fun createFallbackReport(
