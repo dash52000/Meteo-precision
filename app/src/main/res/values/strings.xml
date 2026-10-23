@@ -1,0 +1,16 @@
+<resources>
+    <string name="app_name">Météo Précision</string>
+    <string name="nav_dashboard">Météo</string>
+    <string name="nav_locations">Lieux</string>
+    <string name="nav_reliability">Fiabilité</string>
+    <string name="nav_settings">Réglages</string>
+    <string name="open_meteo_attribution">Weather data by Open-Meteo.com</string>
+    <string name="section_precip_3h">Les 3 prochaines heures · Pluie au 1/4 d\'heure</string>
+    <string name="section_hourly_24h">Journée heure par heure · Temp, Pluie, Vent</string>
+    <string name="section_running_score">Score Course (6h – 21h) &amp; Top 3 Créneaux</string>
+    <string name="section_weekend">Focus Week-end (Samedi &amp; Dimanche)</string>
+    <string name="section_daily_7d">Prévisions 7 jours · Amplitude &amp; Cumul Pluie</string>
+    <string name="search_city_hint">Rechercher une ville (consultation directe ou ajout)…</string>
+    <string name="gps_Position">Position GPS actuelle</string>
+    <string name="retry_action">Actualiser</string>
+</resources>

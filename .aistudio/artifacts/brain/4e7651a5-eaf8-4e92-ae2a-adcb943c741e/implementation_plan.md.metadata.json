@@ -1,0 +1,6 @@
+{
+  "summary":  "Mise à jour du plan d'implémentation pour ajouter les icônes météo WMO (soleil, éclaircies, nuageux, brouillard, pluie, orage), réduire les tuiles du Top 3 créneaux course en lignes ultra-compactes d'une seule ligne, et remplacer les barres Slider par des sélecteurs d'heures directs (- / +) dans la configuration du lieu Boulot.",
+  "updatedAt":  "2026-10-22T11:55:46.229412091Z",
+  "requestFeedback":  true,
+  "userFacing":  true
+}

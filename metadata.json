@@ -1,0 +1,6 @@
+{
+  "name": "Météo Précision",
+  "description": "Station météo personnelle Open-Meteo : graphes haute précision, score course, lieux typés et audit de fiabilité multi-modèles sur 30 jours.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
