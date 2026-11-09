@@ -27,6 +27,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddLocationAlt
 import androidx.compose.material.icons.filled.Air
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.DirectionsBike
 import androidx.compose.material.icons.filled.DirectionsRun
 import androidx.compose.material.icons.filled.Grass
@@ -53,6 +54,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -73,6 +75,7 @@ import com.example.R
 import com.example.model.AirQualitySummary
 import com.example.model.BikeWindStatus
 import com.example.model.CompleteWeatherDashboard
+import com.example.model.ConfidenceLevel
 import com.example.model.DailyWeatherPoint
 import com.example.model.HourlyRunningScore
 import com.example.model.LocationType
@@ -81,9 +84,14 @@ import com.example.model.ScoreLevel
 import com.example.model.TrailConditionStatus
 import com.example.model.WeatherModel
 import com.example.model.WorkCommuteStatus
+import com.example.ui.components.ConfidenceDot
+import com.example.ui.components.DayDetailBottomSheet
+import com.example.ui.components.ForecastDatePickerDialog
 import com.example.ui.components.Hourly24hMultiCurveChart
 import com.example.ui.components.Precipitation3HoursChart
 import com.example.ui.components.WeatherConditionIcon
+import com.example.ui.components.buildDayDetailNow
+import com.example.ui.components.confidenceColor
 import com.example.ui.components.wmoCodeToLabelFr
 import com.example.ui.theme.AmberTemp
 import com.example.ui.theme.CyanPrecip
@@ -126,6 +134,29 @@ fun DashboardScreen(
 ) {
     var showModelPickerDialog by remember { mutableStateOf(false) }
     var inspectedRunningScore by remember { mutableStateOf<HourlyRunningScore?>(null) }
+    // Jour ouvert dans le panneau du bas (date ISO) et calendrier de choix d'un jour
+    var selectedDayIso by rememberSaveable { mutableStateOf<String?>(null) }
+    var showDatePicker by remember { mutableStateOf(false) }
+
+    val selectedDay = dashboard?.dailyAllDays?.firstOrNull { it.dateIso == selectedDayIso }
+    if (dashboard != null && selectedDay != null) {
+        val detail = remember(dashboard, selectedDay) { buildDayDetailNow(selectedDay, dashboard.hourlyByDate) }
+        DayDetailBottomSheet(
+            detail = detail,
+            onDismiss = { selectedDayIso = null }
+        )
+    }
+
+    if (showDatePicker && dashboard != null && dashboard.dailyAllDays.isNotEmpty()) {
+        ForecastDatePickerDialog(
+            availableDatesIso = dashboard.dailyAllDays.map { it.dateIso },
+            onDismiss = { showDatePicker = false },
+            onDateSelected = { iso ->
+                showDatePicker = false
+                selectedDayIso = iso
+            }
+        )
+    }
 
     if (showModelPickerDialog && dashboard != null) {
         ModelOverrideDialog(
@@ -350,12 +381,15 @@ fun DashboardScreen(
                         modelTag = wkModelTag,
                         onModelTagClick = { showModelPickerDialog = true }
                     ) {
-                        WeekendHighlightBlock(weekendDays = dashboard.weekendDays)
+                        WeekendHighlightBlock(
+                            weekendDays = dashboard.weekendDays,
+                            onDayClick = { selectedDayIso = it.dateIso }
+                        )
                     }
                 }
             }
 
-            // 5. Les 7 jours en barres min/max avec le cumul de pluie
+            // 5. Les 7 jours (jusqu'à 16 avec « Voir plus ») en barres min/max avec le cumul de pluie
             item {
                 val dSample = dashboard.daily7Days.lastOrNull()
                 val medModelTag = if (dashboard.isAutoModelActive && dSample != null) {
@@ -368,7 +402,11 @@ fun DashboardScreen(
                     modelTag = medModelTag,
                     onModelTagClick = { showModelPickerDialog = true }
                 ) {
-                    Daily7DaysBarsSection(days = dashboard.daily7Days)
+                    Daily7DaysBarsSection(
+                        days = dashboard.dailyAllDays,
+                        onDayClick = { selectedDayIso = it.dateIso },
+                        onOpenCalendar = { showDatePicker = true }
+                    )
                 }
             }
 
@@ -1107,7 +1145,10 @@ private fun RunningScoreSection(
  * 4. Bloc « Week-end » mis en avant (Samedi et Dimanche) avec icône météo.
  */
 @Composable
-private fun WeekendHighlightBlock(weekendDays: List<DailyWeatherPoint>) {
+private fun WeekendHighlightBlock(
+    weekendDays: List<DailyWeatherPoint>,
+    onDayClick: (DailyWeatherPoint) -> Unit
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1121,6 +1162,7 @@ private fun WeekendHighlightBlock(weekendDays: List<DailyWeatherPoint>) {
                     .clip(RoundedCornerShape(10.dp))
                     .background(SlateSurfaceElevated)
                     .border(1.dp, CyanPrecip.copy(alpha = 0.45f), RoundedCornerShape(10.dp))
+                    .clickable { onDayClick(day) }
                     .padding(10.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
@@ -1167,12 +1209,20 @@ private fun WeekendHighlightBlock(weekendDays: List<DailyWeatherPoint>) {
 
 /**
  * 5. Les 7 jours en barres min/max avec icône météo et cumul de pluie.
+ * « Voir plus » prolonge la liste jusqu'à 16 jours ; chaque ligne ouvre le détail du jour.
+ * La pastille de couleur donne l'indice de confiance (accord ECMWF / GFS).
  */
 @Composable
-private fun Daily7DaysBarsSection(days: List<DailyWeatherPoint>) {
+private fun Daily7DaysBarsSection(
+    days: List<DailyWeatherPoint>,
+    onDayClick: (DailyWeatherPoint) -> Unit,
+    onOpenCalendar: () -> Unit
+) {
     if (days.isEmpty()) return
-    val weekMin = remember(days) { days.minOf { it.tempMinC } }
-    val weekMax = remember(days) { days.maxOf { it.tempMaxC }.coerceAtLeast(weekMin + 4.0) }
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    val visibleDays = if (expanded) days else days.take(7)
+    val weekMin = remember(visibleDays) { visibleDays.minOf { it.tempMinC } }
+    val weekMax = remember(visibleDays) { visibleDays.maxOf { it.tempMaxC }.coerceAtLeast(weekMin + 4.0) }
     val span = (weekMax - weekMin).coerceAtLeast(1.0)
 
     Column(
@@ -1181,21 +1231,52 @@ private fun Daily7DaysBarsSection(days: List<DailyWeatherPoint>) {
             .testTag("daily_7d_bars"),
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        days.forEach { day ->
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Touche un jour pour le détail heure par heure",
+                style = MaterialTheme.typography.labelSmall,
+                color = TextSecondary,
+                modifier = Modifier.weight(1f)
+            )
+            IconButton(
+                onClick = onOpenCalendar,
+                modifier = Modifier
+                    .size(36.dp)
+                    .testTag("open_forecast_calendar")
+            ) {
+                Icon(
+                    imageVector = Icons.Default.CalendarMonth,
+                    contentDescription = "Choisir une date",
+                    tint = CyanPrecip
+                )
+            }
+        }
+
+        visibleDays.forEach { day ->
             val startFrac = ((day.tempMinC - weekMin) / span).toFloat().coerceIn(0f, 1f)
             val endFrac = ((day.tempMaxC - weekMin) / span).toFloat().coerceIn(startFrac + 0.05f, 1f)
+            val dayOfMonth = day.dateIso.takeLast(2).toIntOrNull()
+            val dayLabel = if (day.leadDays == 0 || dayOfMonth == null) day.dayNameShort else "${day.dayNameShort} $dayOfMonth"
 
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(8.dp))
                     .background(if (day.isWeekend) SlateSurfaceBright.copy(alpha = 0.55f) else SlateSurfaceElevated)
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                    .clickable { onDayClick(day) }
+                    .padding(horizontal = 8.dp, vertical = 6.dp)
+                    .testTag("daily_row_${day.dateIso}"),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(modifier = Modifier.width(46.dp)) {
+                ConfidenceDot(confidence = day.confidence)
+                Spacer(modifier = Modifier.width(5.dp))
+
+                Column(modifier = Modifier.width(52.dp)) {
                     Text(
-                        text = day.dayNameShort,
+                        text = dayLabel,
                         style = MaterialTheme.typography.labelLarge,
                         color = if (day.isWeekend) GoldApparentTemp else TextPrimary,
                         maxLines = 1
@@ -1272,6 +1353,48 @@ private fun Daily7DaysBarsSection(days: List<DailyWeatherPoint>) {
                     color = AmberTemp,
                     modifier = Modifier.width(26.dp),
                     maxLines = 1
+                )
+            }
+        }
+
+        if (days.size > 7) {
+            TextButton(
+                onClick = { expanded = !expanded },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("daily_see_more")
+            ) {
+                Text(
+                    text = if (expanded) "Réduire à 7 jours" else "Voir plus (jours 8 à ${days.size})",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = CyanPrecip
+                )
+            }
+        }
+
+        // Légende de l'indice de confiance
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Confiance ECMWF/GFS :",
+                style = MaterialTheme.typography.labelSmall,
+                color = TextMuted
+            )
+            ConfidenceLevel.entries.forEach { level ->
+                Spacer(modifier = Modifier.width(6.dp))
+                Box(
+                    modifier = Modifier
+                        .size(7.dp)
+                        .clip(CircleShape)
+                        .background(confidenceColor(level))
+                )
+                Spacer(modifier = Modifier.width(3.dp))
+                Text(
+                    text = level.labelFr.lowercase(Locale.FRANCE),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextMuted
                 )
             }
         }

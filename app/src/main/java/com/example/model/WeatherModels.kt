@@ -71,6 +71,25 @@ enum class WeatherModel(
         maxLeadDaysForReliability = 7
     );
 
+    /**
+     * Pas de temps natif (en heures) des données du modèle à l'échéance [leadHours].
+     * Au-delà, Open-Meteo interpole à l'heure : ces valeurs horaires n'ont pas de vraie précision horaire.
+     * Sources : documentation Open-Meteo (ECMWF IFS 0.25° : 3 h puis 6 h après 144 h ;
+     * ICON-EU : 1 h jusqu'à 78 h puis 3 h ; GFS : 1 h jusqu'à 120 h puis 3 h ; AROME / ICON-D2 : horaire).
+     */
+    fun nativeStepHoursAt(leadHours: Int): Int = when (this) {
+        AROME, ICON_D2 -> 1
+        ICON_EU -> if (leadHours <= 78) 1 else 3
+        GFS -> if (leadHours <= 120) 1 else 3
+        ECMWF_IFS -> if (leadHours <= 144) 3 else 6
+        // Assemblage variable selon la zone : hypothèse prudente
+        BEST_MATCH -> when {
+            leadHours <= 48 -> 1
+            leadHours <= 120 -> 3
+            else -> 6
+        }
+    }
+
     companion object {
         val comparableModels: List<WeatherModel> = listOf(AROME, ICON_D2, ICON_EU, ECMWF_IFS, GFS)
         val shortTermCandidates: List<WeatherModel> = listOf(AROME, ICON_D2, ICON_EU, ECMWF_IFS, GFS)
@@ -150,7 +169,84 @@ data class DailyWeatherPoint(
     val uvIndexMax: Double?,
     val weatherCode: Int?,
     val tempModelUsed: WeatherModel,
-    val precipModelUsed: WeatherModel
+    val precipModelUsed: WeatherModel,
+    // Écart d'échéance avec aujourd'hui (0 = aujourd'hui)
+    val leadDays: Int = 0,
+    // null = ECMWF ou GFS indisponible pour ce jour : pas d'indice inventé
+    val confidence: DayConfidence? = null
+)
+
+/** Pas de temps réellement disponible pour le détail d'une journée. */
+enum class ForecastStep(val hours: Int, val labelFr: String, val detailFr: String) {
+    HOURLY(1, "Pas horaire", "Données heure par heure natives du modèle"),
+    THREE_HOURS(3, "Pas 3 h", "Le modèle ne calcule qu'un pas toutes les 3 h : pas de détail horaire inventé"),
+    SIX_HOURS(6, "Tranches 6 h", "Le modèle ne calcule qu'un pas toutes les 6 h : regroupement nuit / matin / après-midi / soirée");
+
+    companion object {
+        fun fromHours(hours: Int): ForecastStep = when {
+            hours <= 1 -> HOURLY
+            hours <= 3 -> THREE_HOURS
+            else -> SIX_HOURS
+        }
+    }
+}
+
+enum class ConfidenceLevel(val labelFr: String) {
+    GOOD("Bonne"),
+    MEDIUM("Moyenne"),
+    LOW("Faible")
+}
+
+/** Indice de confiance d'un jour : accord entre ECMWF IFS et GFS (pas une fiabilité mesurée). */
+data class DayConfidence(
+    val level: ConfidenceLevel,
+    val ecmwfTempMinC: Double,
+    val ecmwfTempMaxC: Double,
+    val gfsTempMinC: Double,
+    val gfsTempMaxC: Double,
+    val ecmwfPrecipMm: Double,
+    val gfsPrecipMm: Double
+) {
+    val maxTempGapC: Double
+        get() = maxOf(
+            kotlin.math.abs(ecmwfTempMinC - gfsTempMinC),
+            kotlin.math.abs(ecmwfTempMaxC - gfsTempMaxC)
+        )
+    val precipGapMm: Double
+        get() = kotlin.math.abs(ecmwfPrecipMm - gfsPrecipMm)
+}
+
+/**
+ * Une ligne du détail d'une journée : une heure (pas horaire) ou une tranche (3 h / 6 h).
+ * Heures locales [startHour, endHourExclusive). En pas horaire, min = max.
+ */
+data class DaySlot(
+    val startHour: Int,
+    val endHourExclusive: Int,
+    val label: String,
+    val tempMinC: Double,
+    val tempMaxC: Double,
+    val apparentMinC: Double,
+    val apparentMaxC: Double,
+    val precipitationMm: Double,
+    val windSpeedKmh: Double,
+    val windGustsKmh: Double?,
+    val windDirectionDeg: Int?,
+    val weatherCode: Int?,
+    val isDay: Boolean
+) {
+    val centerHour: Float
+        get() = (startHour + endHourExclusive - 1) / 2f
+}
+
+/** Détail complet d'une journée affiché dans le panneau du bas. */
+data class DayDetail(
+    val day: DailyWeatherPoint,
+    val step: ForecastStep,
+    val hours: List<HourlyWeatherPoint>,
+    val slots: List<DaySlot>,
+    val sunriseHourFraction: Float?,
+    val sunsetHourFraction: Float?
 )
 
 data class AirQualitySummary(
@@ -321,5 +417,9 @@ data class CompleteWeatherDashboard(
     val airQuality: AirQualitySummary,
     val workCommuteStatus: WorkCommuteStatus?,
     val trailConditionStatus: TrailConditionStatus?,
-    val bikeWindStatus: BikeWindStatus?
+    val bikeWindStatus: BikeWindStatus?,
+    // Jusqu'à 16 jours (aujourd'hui inclus) pour « Voir plus » et le calendrier
+    val dailyAllDays: List<DailyWeatherPoint> = daily7Days,
+    // Points horaires de chaque jour (clé = date ISO), pour le détail d'un jour
+    val hourlyByDate: Map<String, List<HourlyWeatherPoint>> = emptyMap()
 )

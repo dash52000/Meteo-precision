@@ -26,9 +26,9 @@ jobs:
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee build.log
 
-      - name: Tests unitaires (station IRM, fiabilité, score course)
+      - name: Tests unitaires (station IRM, fiabilité, score course, détail du jour)
         run: |
-          ./gradlew testDebugUnitTest --no-daemon --tests 'com.example.IrmStationSourceTest' --tests 'com.example.ExampleRobolectricTest' 2>&1 | tee -a build.log
+          ./gradlew testDebugUnitTest --no-daemon --tests 'com.example.IrmStationSourceTest' --tests 'com.example.ExampleRobolectricTest' --tests 'com.example.DayDetailEngineTest' 2>&1 | tee -a build.log
 
       # Vérifie le format réel du service IRM (Buzenol, 3 derniers jours) ; n'empêche jamais le build.
       - name: Sonde IRM

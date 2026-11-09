@@ -47,6 +47,9 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.domain.DayDetailEngine
+import com.example.model.DaySlot
+import com.example.model.ForecastStep
 import com.example.model.ForecastVsRealDayPoint
 import com.example.model.HourlyWeatherPoint
 import com.example.model.Minutely15Point
@@ -64,6 +67,7 @@ import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
 import com.example.ui.theme.VioletWind
 import java.util.Locale
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 /**
@@ -172,6 +176,10 @@ fun Precipitation3HoursChart(
  * 2. Graphe de la journée heure par heure (24 h) calibré pour écran S25 :
  * Courbes superposées de température, ressenti, précipitations, vent et rafales.
  * Nuits grisées selon le lever et le coucher du soleil + durée du jour.
+ *
+ * [slots] : lignes de lecture du curseur et barres de pluie. null = pas horaire (une par heure).
+ * En tranches de 3 h / 6 h, le curseur sélectionne une tranche entière (min–max, cumul) :
+ * aucune valeur horaire interpolée n'est présentée comme précise.
  */
 @OptIn(ExperimentalLayoutApi::class, ExperimentalTextApi::class)
 @Composable
@@ -182,13 +190,21 @@ fun Hourly24hMultiCurveChart(
     sunriseLabel: String,
     sunsetLabel: String,
     daylightDurationLabel: String,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    slots: List<DaySlot>? = null
 ) {
     if (hours.isEmpty()) return
-    var selectedIdx by remember(hours) {
-        mutableIntStateOf((hours.size / 2).coerceIn(0, hours.lastIndex))
+    val chartSlots = remember(hours, slots) {
+        slots?.takeIf { it.isNotEmpty() } ?: DayDetailEngine.buildSlots(hours, ForecastStep.HOURLY)
     }
-    val selectedPoint = hours[selectedIdx.coerceIn(0, hours.lastIndex)]
+    if (chartSlots.isEmpty()) return
+    val isHourly = remember(chartSlots) { chartSlots.all { it.endHourExclusive - it.startHour <= 1 } }
+    val slotHours = chartSlots.first().let { it.endHourExclusive - it.startHour }
+
+    var selectedIdx by remember(chartSlots) {
+        mutableIntStateOf((chartSlots.size / 2).coerceIn(0, chartSlots.lastIndex))
+    }
+    val selectedSlot = chartSlots[selectedIdx.coerceIn(0, chartSlots.lastIndex)]
 
     val minTemp = remember(hours) {
         (hours.minOf { minOf(it.temperatureC, it.apparentTemperatureC) } - 2.0)
@@ -200,10 +216,16 @@ fun Hourly24hMultiCurveChart(
     val maxWind = remember(hours) {
         (hours.maxOf { maxOf(it.windSpeedKmh, it.windGustsKmh ?: it.windSpeedKmh) } * 1.15).coerceAtLeast(30.0)
     }
-    val maxPrecip = remember(hours) {
-        (hours.maxOf { it.precipitationMm } * 1.3).coerceAtLeast(2.0)
+    val maxPrecip = remember(chartSlots) {
+        (chartSlots.maxOf { it.precipitationMm } * 1.3).coerceAtLeast(2.0)
     }
     val textMeasurer = rememberTextMeasurer()
+
+    // Choisit la ligne (heure ou tranche) la plus proche de l'heure touchée
+    fun slotIndexAt(xFraction: Float): Int {
+        val hourAt = xFraction.coerceIn(0f, 1f) * 23f
+        return chartSlots.indices.minByOrNull { abs(chartSlots[it].centerHour - hourAt) } ?: 0
+    }
 
     Column(modifier = modifier.fillMaxWidth()) {
         // Bandeau Lever / Coucher du soleil & Durée du jour optimisé 360dp
@@ -240,7 +262,7 @@ fun Hourly24hMultiCurveChart(
         ) {
             LegendDot(color = AmberTemp, label = "Temp °C")
             LegendDot(color = GoldApparentTemp, label = "Ressenti (pointillé)")
-            LegendDot(color = CyanPrecip, label = "Pluie mm")
+            LegendDot(color = CyanPrecip, label = if (isHourly) "Pluie mm" else "Pluie mm / ${slotHours} h")
             LegendDot(color = VioletWind, label = "Vent km/h")
             LegendDot(color = MagentaGusts, label = "Rafales")
         }
@@ -262,15 +284,18 @@ fun Hourly24hMultiCurveChart(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     WeatherConditionIcon(
-                        weatherCode = selectedPoint.weatherCode,
-                        isDay = selectedPoint.isDay,
+                        weatherCode = selectedSlot.weatherCode,
+                        isDay = selectedSlot.isDay,
                         modifier = Modifier.size(20.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = "${selectedPoint.hourLabel}00 · ${wmoCodeToLabelFr(selectedPoint.weatherCode, selectedPoint.isDay)}",
+                        text = "${slotTitle(selectedSlot)} · ${wmoCodeToLabelFr(selectedSlot.weatherCode, selectedSlot.isDay)}",
                         style = MaterialTheme.typography.labelLarge,
                         color = TextPrimary,
                         maxLines = 1,
@@ -280,7 +305,7 @@ fun Hourly24hMultiCurveChart(
                 // Chaque valeur dans la couleur de sa courbe
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = String.format(Locale.FRANCE, "T° %.1f°", selectedPoint.temperatureC),
+                        text = "T° ${tempRangeLabel(selectedSlot.tempMinC, selectedSlot.tempMaxC, isHourly)}",
                         style = MaterialTheme.typography.labelMedium,
                         color = AmberTemp
                     )
@@ -290,7 +315,7 @@ fun Hourly24hMultiCurveChart(
                         color = TextMuted
                     )
                     Text(
-                        text = String.format(Locale.FRANCE, "Ressenti %.1f°", selectedPoint.apparentTemperatureC),
+                        text = "Ressenti ${tempRangeLabel(selectedSlot.apparentMinC, selectedSlot.apparentMaxC, isHourly)}",
                         style = MaterialTheme.typography.labelMedium,
                         color = GoldApparentTemp
                     )
@@ -302,13 +327,21 @@ fun Hourly24hMultiCurveChart(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = String.format(Locale.FRANCE, "Pluie : %.1f mm/h", selectedPoint.precipitationMm),
+                    text = if (isHourly) {
+                        String.format(Locale.FRANCE, "Pluie : %.1f mm/h", selectedSlot.precipitationMm)
+                    } else {
+                        String.format(Locale.FRANCE, "Pluie : %.1f mm / %d h", selectedSlot.precipitationMm, slotHours)
+                    },
                     style = MaterialTheme.typography.labelSmall,
                     color = CyanPrecip
                 )
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = String.format(Locale.FRANCE, "Vent %.0f km/h", selectedPoint.windSpeedKmh),
+                        text = String.format(
+                            Locale.FRANCE,
+                            if (isHourly) "Vent %.0f km/h" else "Vent max %.0f km/h",
+                            selectedSlot.windSpeedKmh
+                        ),
                         style = MaterialTheme.typography.labelSmall,
                         color = VioletWind
                     )
@@ -318,7 +351,7 @@ fun Hourly24hMultiCurveChart(
                         color = TextMuted
                     )
                     Text(
-                        text = "Raf. ${selectedPoint.windGustsKmh?.let { String.format(Locale.FRANCE, "%.0f", it) } ?: "—"} km/h",
+                        text = "Raf. ${selectedSlot.windGustsKmh?.let { String.format(Locale.FRANCE, "%.0f", it) } ?: "—"} km/h",
                         style = MaterialTheme.typography.labelSmall,
                         color = MagentaGusts
                     )
@@ -328,7 +361,14 @@ fun Hourly24hMultiCurveChart(
 
         Spacer(modifier = Modifier.height(6.dp))
 
-        // Frise d'aperçu rapide des icônes météo de la journée (toutes les 4 heures)
+        // Frise d'aperçu rapide des icônes météo : toutes les 4 heures, ou une par tranche
+        val frieze: List<Triple<Int?, Boolean, String>> = if (isHourly) {
+            listOf(0, 4, 8, 12, 16, 20, 23).mapNotNull { h ->
+                chartSlots.firstOrNull { it.startHour == h }?.let { Triple(it.weatherCode, it.isDay, it.label) }
+            }
+        } else {
+            chartSlots.map { Triple(it.weatherCode, it.isDay, if (slotHours >= 6) it.label else "${it.startHour}h") }
+        }
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -336,17 +376,18 @@ fun Hourly24hMultiCurveChart(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            listOf(0, 4, 8, 12, 16, 20, 23).mapNotNull { hIdx -> hours.getOrNull(hIdx) }.forEach { pt ->
+            frieze.forEach { (code, isDay, label) ->
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     WeatherConditionIcon(
-                        weatherCode = pt.weatherCode,
-                        isDay = pt.isDay,
+                        weatherCode = code,
+                        isDay = isDay,
                         modifier = Modifier.size(18.dp)
                     )
                     Text(
-                        text = pt.hourLabel,
+                        text = label,
                         style = MaterialTheme.typography.labelSmall,
-                        color = TextMuted
+                        color = TextMuted,
+                        maxLines = 1
                     )
                 }
             }
@@ -361,17 +402,15 @@ fun Hourly24hMultiCurveChart(
                 .clip(RoundedCornerShape(10.dp))
                 .background(SlateSurfaceElevated)
                 .border(1.dp, SlateBorder, RoundedCornerShape(10.dp))
-                .pointerInput(hours.size) {
+                .pointerInput(chartSlots) {
                     detectTapGestures { offset ->
-                        val frac = (offset.x / size.width.coerceAtLeast(1)).coerceIn(0f, 1f)
-                        selectedIdx = (frac * (hours.size - 1)).roundToInt().coerceIn(0, hours.lastIndex)
+                        selectedIdx = slotIndexAt(offset.x / size.width.coerceAtLeast(1))
                     }
                 }
-                .pointerInput(hours.size) {
+                .pointerInput(chartSlots) {
                     detectHorizontalDragGestures { change, _ ->
                         change.consume()
-                        val frac = (change.position.x / size.width.coerceAtLeast(1)).coerceIn(0f, 1f)
-                        selectedIdx = (frac * (hours.size - 1)).roundToInt().coerceIn(0, hours.lastIndex)
+                        selectedIdx = slotIndexAt(change.position.x / size.width.coerceAtLeast(1))
                     }
                 }
                 .padding(horizontal = 8.dp, vertical = 8.dp)
@@ -380,8 +419,8 @@ fun Hourly24hMultiCurveChart(
             Canvas(modifier = Modifier.fillMaxSize()) {
                 val w = size.width
                 val chartH = size.height - 18.dp.toPx()
-                val n = (hours.size - 1).coerceAtLeast(1)
 
+                // Position horizontale selon l'heure de la journée (0 h à gauche, 23 h à droite)
                 fun xForHour(hFraction: Float): Float =
                     ((hFraction / 23f) * w).coerceIn(0f, w)
 
@@ -400,6 +439,17 @@ fun Hourly24hMultiCurveChart(
                         color = NightShadeOverlay,
                         topLeft = Offset(sunsetX, 0f),
                         size = Size(w - sunsetX, chartH)
+                    )
+                }
+
+                // Tranche sélectionnée : bande en surbrillance sur toute sa durée
+                if (!isHourly) {
+                    val bandLeft = xForHour(selectedSlot.startHour - 0.5f)
+                    val bandRight = xForHour(selectedSlot.endHourExclusive - 0.5f)
+                    drawRect(
+                        color = TextPrimary.copy(alpha = 0.08f),
+                        topLeft = Offset(bandLeft, 0f),
+                        size = Size((bandRight - bandLeft).coerceAtLeast(1f), chartH)
                     )
                 }
 
@@ -428,16 +478,27 @@ fun Hourly24hMultiCurveChart(
                     drawText(windLabel, topLeft = Offset(w - windLabel.size.width - 2f, y - windLabel.size.height))
                 }
 
-                val slotW = w / hours.size.coerceAtLeast(1)
-                hours.forEachIndexed { idx, pt ->
-                    if (pt.precipitationMm > 0.0) {
-                        val pRatio = (pt.precipitationMm / maxPrecip).toFloat().coerceIn(0f, 1f)
+                // Barres de pluie : une par heure, ou une large barre par tranche (cumul de la tranche)
+                val hourW = w / 24f
+                chartSlots.forEach { slot ->
+                    if (slot.precipitationMm > 0.0) {
+                        val pRatio = (slot.precipitationMm / maxPrecip).toFloat().coerceIn(0f, 1f)
                         val barH = (pRatio * chartH * 0.45f).coerceAtLeast(4f)
-                        val xCenter = (idx.toFloat() / n) * w
-                        val barW = (slotW * 0.55f).coerceAtLeast(4f)
+                        val left: Float
+                        val barW: Float
+                        if (isHourly) {
+                            barW = (hourW * 0.55f).coerceAtLeast(4f)
+                            left = xForHour(slot.startHour.toFloat()) - barW / 2f
+                        } else {
+                            val inset = 2.dp.toPx()
+                            val l = xForHour(slot.startHour - 0.5f) + inset
+                            val r = xForHour(slot.endHourExclusive - 0.5f) - inset
+                            left = l
+                            barW = (r - l).coerceAtLeast(4f)
+                        }
                         drawRoundRect(
                             color = DeepBluePrecip.copy(alpha = 0.75f),
-                            topLeft = Offset(xCenter - barW / 2f, chartH - barH),
+                            topLeft = Offset(left, chartH - barH),
                             size = Size(barW, barH),
                             cornerRadius = CornerRadius(3f, 3f)
                         )
@@ -448,12 +509,14 @@ fun Hourly24hMultiCurveChart(
                 fun buildSeriesPath(selector: (HourlyWeatherPoint) -> Double?, minVal: Double, maxVal: Double): Path {
                     val path = Path()
                     var penDown = false
-                    hours.forEachIndexed { idx, pt ->
+                    var previousHour = -2
+                    hours.forEach { pt ->
                         val value = selector(pt)
-                        if (value == null) {
-                            penDown = false
-                        } else {
-                            val x = (idx.toFloat() / n) * w
+                        // Heure manquante dans les données : on lève le crayon
+                        if (value == null || pt.hourOfDay != previousHour + 1) penDown = false
+                        previousHour = pt.hourOfDay
+                        if (value != null) {
+                            val x = xForHour(pt.hourOfDay.toFloat())
                             val norm = ((value - minVal) / (maxVal - minVal)).toFloat().coerceIn(0f, 1f)
                             val y = chartH * (1f - (0.08f + norm * 0.84f))
                             if (penDown) path.lineTo(x, y) else path.moveTo(x, y)
@@ -497,26 +560,28 @@ fun Hourly24hMultiCurveChart(
                     style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
                 )
 
-                val selX = (selectedIdx.toFloat() / n) * w
-                drawLine(
-                    color = TextPrimary.copy(alpha = 0.7f),
-                    start = Offset(selX, 0f),
-                    end = Offset(selX, chartH),
-                    strokeWidth = 1.5.dp.toPx()
-                )
-                // Un point sur chaque courbe à l'heure du curseur
-                fun yFor(value: Double, minVal: Double, maxVal: Double): Float {
-                    val norm = ((value - minVal) / (maxVal - minVal)).toFloat().coerceIn(0f, 1f)
-                    return chartH * (1f - (0.08f + norm * 0.84f))
+                // Pas horaire : curseur + un point sur chaque courbe à l'heure choisie
+                if (isHourly) {
+                    val selX = xForHour(selectedSlot.startHour.toFloat())
+                    drawLine(
+                        color = TextPrimary.copy(alpha = 0.7f),
+                        start = Offset(selX, 0f),
+                        end = Offset(selX, chartH),
+                        strokeWidth = 1.5.dp.toPx()
+                    )
+                    fun yFor(value: Double, minVal: Double, maxVal: Double): Float {
+                        val norm = ((value - minVal) / (maxVal - minVal)).toFloat().coerceIn(0f, 1f)
+                        return chartH * (1f - (0.08f + norm * 0.84f))
+                    }
+                    fun marker(color: Color, y: Float, radiusDp: Float) {
+                        drawCircle(color = SlateSurfaceElevated, radius = (radiusDp + 1.5f).dp.toPx(), center = Offset(selX, y))
+                        drawCircle(color = color, radius = radiusDp.dp.toPx(), center = Offset(selX, y))
+                    }
+                    marker(VioletWind, yFor(selectedSlot.windSpeedKmh, 0.0, maxWind), 4f)
+                    selectedSlot.windGustsKmh?.let { marker(MagentaGusts, yFor(it, 0.0, maxWind), 4f) }
+                    marker(GoldApparentTemp, yFor(selectedSlot.apparentMaxC, minTemp, maxTemp), 4.5f)
+                    marker(AmberTemp, yFor(selectedSlot.tempMaxC, minTemp, maxTemp), 5f)
                 }
-                fun marker(color: Color, y: Float, radiusDp: Float) {
-                    drawCircle(color = SlateSurfaceElevated, radius = (radiusDp + 1.5f).dp.toPx(), center = Offset(selX, y))
-                    drawCircle(color = color, radius = radiusDp.dp.toPx(), center = Offset(selX, y))
-                }
-                marker(VioletWind, yFor(selectedPoint.windSpeedKmh, 0.0, maxWind), 4f)
-                selectedPoint.windGustsKmh?.let { marker(MagentaGusts, yFor(it, 0.0, maxWind), 4f) }
-                marker(GoldApparentTemp, yFor(selectedPoint.apparentTemperatureC, minTemp, maxTemp), 4.5f)
-                marker(AmberTemp, yFor(selectedPoint.temperatureC, minTemp, maxTemp), 5f)
             }
 
             Row(
@@ -535,6 +600,21 @@ fun Hourly24hMultiCurveChart(
             }
         }
     }
+}
+
+/** Titre d'une ligne : « 14h00 », « 12h–15h » ou « Matin 6–12h ». */
+fun slotTitle(slot: DaySlot): String = when {
+    slot.endHourExclusive - slot.startHour <= 1 -> "${slot.startHour}h00"
+    slot.label.firstOrNull()?.isDigit() == true -> slot.label
+    else -> "${slot.label} ${slot.startHour}–${slot.endHourExclusive}h"
+}
+
+/** « 12,3° » en pas horaire ; « 10–13° » (ou « 12° » si min = max à l'arrondi) pour une tranche. */
+fun tempRangeLabel(minC: Double, maxC: Double, precise: Boolean): String {
+    if (precise) return String.format(Locale.FRANCE, "%.1f°", maxC)
+    val lo = minC.roundToInt()
+    val hi = maxC.roundToInt()
+    return if (lo == hi) "$lo°" else "$lo–$hi°"
 }
 
 /**

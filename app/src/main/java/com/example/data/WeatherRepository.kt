@@ -15,10 +15,12 @@ import com.example.model.CompleteWeatherDashboard
 import com.example.model.LocationReliabilityReport
 import com.example.model.LocationType
 import com.example.model.WeatherModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.util.Locale
@@ -187,21 +189,19 @@ class WeatherRepository(
         val autoRec = report.autoRecommendation
         val manualModel = WeatherModel.fromApiId(location.forcedModelApiId)
 
-        val modelsToFetch = if (manualModel != null) {
-            if (manualModel == WeatherModel.BEST_MATCH) {
-                listOf(WeatherModel.BEST_MATCH)
-            } else {
-                // Ajouter ECMWF_IFS en secours pour couvrir les jours 3 à 7 si un modèle régional court terme est forcé
-                listOf(manualModel, WeatherModel.ECMWF_IFS).distinct()
-            }
+        val selectedModels = if (manualModel != null) {
+            listOf(manualModel)
         } else {
             listOf(
                 autoRec.tempModel0to48h,
                 autoRec.precipModel0to48h,
                 autoRec.tempModelOver48h,
                 autoRec.precipModelOver48h
-            ).distinct()
+            )
         }
+        // ECMWF IFS et GFS sont toujours ajoutés : ce sont les seuls à couvrir J8 à J16 (relais des modèles
+        // régionaux) et leur écart sert à l'indice de confiance de chaque jour.
+        val modelsToFetch = (selectedModels + listOf(WeatherModel.ECMWF_IFS, WeatherModel.GFS)).distinct()
 
         val cacheKey = "${location.coordKey}_${modelsToFetch.joinToString("-") { it.apiId }}"
 
@@ -257,17 +257,20 @@ class WeatherRepository(
 
         val airQualitySummary = openMeteoClient.parseAirQuality(effectiveAqJson)
 
-        val dashboard = ForecastParserEngine.buildDashboardFromJson(
-            forecastJsonString = effectiveForecastJson,
-            airQuality = airQualitySummary,
-            location = location,
-            settings = settings,
-            autoRecommendation = autoRec,
-            manualModel = manualModel,
-            nowDateTime = LocalDateTime.now(),
-            dataFetchedAtMillis = dataFetchedAtMillis,
-            fromOfflineCache = fromOfflineCache
-        )
+        // 16 jours × plusieurs modèles : analyse du JSON hors du thread d'affichage
+        val dashboard = withContext(Dispatchers.Default) {
+            ForecastParserEngine.buildDashboardFromJson(
+                forecastJsonString = effectiveForecastJson,
+                airQuality = airQualitySummary,
+                location = location,
+                settings = settings,
+                autoRecommendation = autoRec,
+                manualModel = manualModel,
+                nowDateTime = LocalDateTime.now(),
+                dataFetchedAtMillis = dataFetchedAtMillis,
+                fromOfflineCache = fromOfflineCache
+            )
+        }
 
         // Si le lieu est enregistré en base, mettre à jour son résumé pour l'écran Liste des lieux
         if (location.id != null) {

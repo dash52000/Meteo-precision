@@ -22,6 +22,9 @@ import java.util.Locale
 
 object ForecastParserEngine {
 
+    /** Nombre de jours affichables (aujourd'hui inclus), aligné sur forecast_days de l'API. */
+    const val MAX_FORECAST_DAYS = 16
+
     private val frenchDayShort = mapOf(
         1 to "Lun",
         2 to "Mar",
@@ -201,14 +204,15 @@ object ForecastParserEngine {
             past48hRainSum += (pMm ?: 0.0).coerceAtLeast(0.0)
         }
 
-        // Extraire les 24 heures de la journée actuelle
-        val todayHourlyPoints = mutableListOf<HourlyWeatherPoint>()
-        for (offset in 0 until 24) {
-            val idx = todayStartHourIdx + offset
-            if (idx >= hourlyTimes.length()) break
+        // Extraire toutes les heures d'aujourd'hui à J+15 (détail de chaque jour), aujourd'hui en tête
+        val lastDateIso = nowDateTime.toLocalDate().plusDays((MAX_FORECAST_DAYS - 1).toLong()).toString()
+        val allHourlyPoints = mutableListOf<HourlyWeatherPoint>()
+        for (idx in todayStartHourIdx until hourlyTimes.length()) {
+            val offset = idx - todayStartHourIdx
             val tIso = hourlyTimes.optString(idx, "")
             val datePart = if (tIso.length >= 10) tIso.substring(0, 10) else todayDateIso
-            val hourVal = if (tIso.length >= 13) tIso.substring(11, 13).toIntOrNull() ?: offset else offset
+            if (datePart > lastDateIso) break
+            val hourVal = if (tIso.length >= 13) tIso.substring(11, 13).toIntOrNull() ?: (offset % 24) else (offset % 24)
 
             val hoursAheadFromNow = (idx - currentHourIdx).coerceAtLeast(0)
             val targetTempModel = manualModel ?: if (hoursAheadFromNow <= 48) {
@@ -241,7 +245,7 @@ object ForecastParserEngine {
             val isDayVal = resolveOptional(hourlySection, "is_day", idx, actualTempM, fallbackChain).first
                 ?: if (hourVal in 7..20) 1.0 else 0.0
 
-            todayHourlyPoints.add(
+            allHourlyPoints.add(
                 HourlyWeatherPoint(
                     timeIso = tIso,
                     dateIso = datePart,
@@ -263,6 +267,9 @@ object ForecastParserEngine {
             )
         }
 
+        val todayHourlyPoints = allHourlyPoints.filter { it.dateIso == todayDateIso }
+        val hourlyByDate: Map<String, List<HourlyWeatherPoint>> = allHourlyPoints.groupBy { it.dateIso }
+
         // Si minutely_15 est vide (certains modèles globaux hors Europe), synthétiser les 12 quarts d'heure à partir des 3 prochaines heures
         if (minutelyPoints.isEmpty() && todayHourlyPoints.isNotEmpty()) {
             val baseHour = nowDateTime.hour
@@ -281,7 +288,7 @@ object ForecastParserEngine {
             }
         }
 
-        // 3. Données journalières (7 jours à partir d'aujourd'hui)
+        // 3. Données journalières (jusqu'à 16 jours à partir d'aujourd'hui)
         val dailySection = root.optJSONObject("daily")
         val dailyTimes = dailySection?.optJSONArray("time") ?: JSONArray()
         var todayDailyIdx = -1
@@ -293,7 +300,15 @@ object ForecastParserEngine {
         }
 
         val dailyPoints = mutableListOf<DailyWeatherPoint>()
-        for (dayOffset in 0 until (if (todayDailyIdx < 0) 0 else 8)) {
+        // Valeur d'un modèle précis, sans repli : sert à comparer ECMWF et GFS pour l'indice de confiance
+        fun modelValue(section: JSONObject?, baseVar: String, index: Int, model: WeatherModel): Double? {
+            val arr = section?.optJSONArray("${baseVar}_${model.apiId}") ?: return null
+            if (index >= arr.length() || arr.isNull(index)) return null
+            val v = arr.optDouble(index, Double.NaN)
+            return if (v.isNaN()) null else v
+        }
+
+        for (dayOffset in 0 until (if (todayDailyIdx < 0) 0 else MAX_FORECAST_DAYS)) {
             val idx = todayDailyIdx + dayOffset
             if (idx >= dailyTimes.length()) break
             val dIso = dailyTimes.optString(idx, "")
@@ -367,7 +382,16 @@ object ForecastParserEngine {
                     uvIndexMax = uvMax?.coerceAtLeast(0.0),
                     weatherCode = wCode?.toInt(),
                     tempModelUsed = actualTempM,
-                    precipModelUsed = actualPrecipM
+                    precipModelUsed = actualPrecipM,
+                    leadDays = dayOffset,
+                    confidence = DayDetailEngine.computeConfidence(
+                        ecmwfTempMinC = modelValue(dailySection, "temperature_2m_min", idx, WeatherModel.ECMWF_IFS),
+                        ecmwfTempMaxC = modelValue(dailySection, "temperature_2m_max", idx, WeatherModel.ECMWF_IFS),
+                        ecmwfPrecipMm = modelValue(dailySection, "precipitation_sum", idx, WeatherModel.ECMWF_IFS),
+                        gfsTempMinC = modelValue(dailySection, "temperature_2m_min", idx, WeatherModel.GFS),
+                        gfsTempMaxC = modelValue(dailySection, "temperature_2m_max", idx, WeatherModel.GFS),
+                        gfsPrecipMm = modelValue(dailySection, "precipitation_sum", idx, WeatherModel.GFS)
+                    )
                 )
             )
         }
@@ -429,7 +453,9 @@ object ForecastParserEngine {
             airQuality = airQuality,
             workCommuteStatus = workStatus,
             trailConditionStatus = trailStatus,
-            bikeWindStatus = bikeStatus
+            bikeWindStatus = bikeStatus,
+            dailyAllDays = dailyPoints.take(MAX_FORECAST_DAYS),
+            hourlyByDate = hourlyByDate
         )
     }
 

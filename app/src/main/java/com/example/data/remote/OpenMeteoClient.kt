@@ -47,7 +47,8 @@ class OpenMeteoClient(
 
     /**
      * Appelle l'API Forecast d'Open-Meteo avec les données 15 minutes, horaires (incluant past_days=2 pour
-     * le cumul de pluie 48h des spots de trail) et journalières (sur 8 jours).
+     * le cumul de pluie 48h des spots de trail) et journalières sur 16 jours (maximum de l'API, couvert
+     * par ECMWF IFS et GFS ; les modèles régionaux s'arrêtent avant et laissent des valeurs nulles).
      * Peut interroger un modèle unique ou plusieurs modèles simultanément (pour le mode Auto hybride).
      */
     suspend fun fetchForecastJson(
@@ -69,7 +70,7 @@ class OpenMeteoClient(
                 "weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset,daylight_duration,uv_index_max,precipitation_sum,wind_speed_10m_max,wind_gusts_10m_max,wind_direction_10m_dominant"
             )
             .addQueryParameter("past_days", "2")
-            .addQueryParameter("forecast_days", "8")
+            .addQueryParameter("forecast_days", FORECAST_DAYS.toString())
             .addQueryParameter("timezone", "auto")
 
         if (modelParam.isNotBlank() && modelParam != WeatherModel.BEST_MATCH.apiId) {
@@ -83,6 +84,11 @@ class OpenMeteoClient(
             }
             response.body?.string() ?: throw IllegalStateException("Réponse Forecast API vide")
         }
+    }
+
+    companion object {
+        /** Horizon maximal de l'API Forecast d'Open-Meteo (aujourd'hui inclus). */
+        const val FORECAST_DAYS = 16
     }
 
     /**
