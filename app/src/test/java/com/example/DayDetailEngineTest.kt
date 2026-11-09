@@ -11,6 +11,7 @@ import com.example.model.ForecastStep
 import com.example.model.HourlyWeatherPoint
 import com.example.model.LocationType
 import com.example.model.WeatherModel
+import com.example.ui.components.tempRangeLabel
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -176,6 +177,14 @@ class DayDetailEngineTest {
         )
         assertEquals(3, DayDetailEngine.dominantWeatherCode(dry, 0.1))
         assertEquals(51, DayDetailEngine.dominantWeatherCode(dry, 0.5))
+    }
+
+    @Test
+    fun `format des plages de temperature, y compris negatives`() {
+        assertEquals("4–11°", tempRangeLabel(3.6, 10.6, precise = false))
+        assertEquals("12°", tempRangeLabel(11.8, 12.2, precise = false))
+        assertEquals("\u22122…\u22121°", tempRangeLabel(-2.2, -0.8, precise = false))
+        assertEquals("\u22121…3°", tempRangeLabel(-1.0, 3.0, precise = false))
     }
 
     // --- Indice de confiance ECMWF / GFS ---

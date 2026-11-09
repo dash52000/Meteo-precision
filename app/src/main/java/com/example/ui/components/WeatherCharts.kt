@@ -294,8 +294,13 @@ fun Hourly24hMultiCurveChart(
                         modifier = Modifier.size(20.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
+                    // En tranche, le titre est déjà long : l'icône suffit pour le temps
                     Text(
-                        text = "${slotTitle(selectedSlot)} · ${wmoCodeToLabelFr(selectedSlot.weatherCode, selectedSlot.isDay)}",
+                        text = if (isHourly) {
+                            "${slotTitle(selectedSlot)} · ${wmoCodeToLabelFr(selectedSlot.weatherCode, selectedSlot.isDay)}"
+                        } else {
+                            slotTitle(selectedSlot)
+                        },
                         style = MaterialTheme.typography.labelLarge,
                         color = TextPrimary,
                         maxLines = 1,
@@ -609,12 +614,20 @@ fun slotTitle(slot: DaySlot): String = when {
     else -> "${slot.label} ${slot.startHour}–${slot.endHourExclusive}h"
 }
 
-/** « 12,3° » en pas horaire ; « 10–13° » (ou « 12° » si min = max à l'arrondi) pour une tranche. */
+/**
+ * « 12,3° » en pas horaire ; « 10–13° » (ou « 12° » si min = max à l'arrondi) pour une tranche.
+ * Avec une valeur négative, séparateur « … » et vrai signe moins : « −2…−1° » plutôt que « -2--1° ».
+ */
 fun tempRangeLabel(minC: Double, maxC: Double, precise: Boolean): String {
     if (precise) return String.format(Locale.FRANCE, "%.1f°", maxC)
     val lo = minC.roundToInt()
     val hi = maxC.roundToInt()
-    return if (lo == hi) "$lo°" else "$lo–$hi°"
+    fun signed(v: Int): String = if (v < 0) "\u2212${-v}" else "$v"
+    return when {
+        lo == hi -> "${signed(lo)}°"
+        lo < 0 || hi < 0 -> "${signed(lo)}…${signed(hi)}°"
+        else -> "$lo–$hi°"
+    }
 }
 
 /**
